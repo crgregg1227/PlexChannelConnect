@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import com.projectivy.plexconnect.channels.ChannelSyncManager
 import com.projectivy.plexconnect.data.AppPreferences
 import com.projectivy.plexconnect.data.BuiltInChannelType
+import com.projectivy.plexconnect.data.PlaybackEngineMode
 import com.projectivy.plexconnect.data.PlexCollection
 import com.projectivy.plexconnect.network.PlexApiClient
 import com.projectivy.plexconnect.network.PlexDiscoveryAndAuth
@@ -40,6 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusBanner: TextView
     private lateinit var pinBox: TextView
+    private lateinit var playbackModeContainer: LinearLayout
     private lateinit var channelsContainer: LinearLayout
     private lateinit var collectionsContainer: LinearLayout
 
@@ -58,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         if (prefs.isConfigured()) {
             updateStatusText()
             SyncWorker.schedulePeriodicSync(this)
-            PlexRealtimeSyncService.startService(this, forceFullSync = false)
+            PlexRealtimeSyncService.startService(this, forceFullSync = true)
             loadCollectionsList()
         } else {
             attemptZeroConfigDiscoveryThenPin()
@@ -141,7 +143,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val header = TextView(this).apply {
-            text = "Plex Channel Connect for Projectivy"
+            text = "Plex Channel Connect v1.1 (Single-Click Play)"
             setTextColor(Color.parseColor("#E5A00D"))
             textSize = 28f
             typeface = Typeface.DEFAULT_BOLD
@@ -149,7 +151,7 @@ class MainActivity : AppCompatActivity() {
         container.addView(header)
 
         val subHeader = TextView(this).apply {
-            text = "Publishes Continue Watching (16:9 stills) & Library Channels (2:3 posters) with real-time playback sync"
+            text = "Single-click instant playback from Projectivy • 16:9 in-progress stills & 2:3 unplayed posters"
             setTextColor(Color.parseColor("#8B949E"))
             textSize = 15f
             setPadding(0, 6, 0, 20)
@@ -219,12 +221,27 @@ class MainActivity : AppCompatActivity() {
 
         container.addView(actionRow)
 
-        val chanTitle = TextView(this).apply {
-            text = "1. Home Screen Channels & System Watch Next Row"
+        val playbackTitle = TextView(this).apply {
+            text = "1. Single-Click Playback Engine (Click to switch)"
             setTextColor(Color.WHITE)
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 8, 0, 12)
+            setPadding(0, 4, 0, 12)
+        }
+        container.addView(playbackTitle)
+
+        playbackModeContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        container.addView(playbackModeContainer)
+        populatePlaybackModeSelector()
+
+        val chanTitle = TextView(this).apply {
+            text = "2. Home Screen Channels & System Watch Next Row"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 24, 0, 12)
         }
         container.addView(chanTitle)
 
@@ -235,7 +252,7 @@ class MainActivity : AppCompatActivity() {
         populateChannelToggles()
 
         val collTitle = TextView(this).apply {
-            text = "2. Plex Collections Channels (Toggle any collection to add its own row)"
+            text = "3. Plex Collections Channels (Toggle any collection to add its own row)"
             setTextColor(Color.WHITE)
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
@@ -251,6 +268,30 @@ class MainActivity : AppCompatActivity() {
         scroll.addView(container)
         setContentView(scroll)
         syncNowBtn.requestFocus()
+    }
+
+    private fun populatePlaybackModeSelector() {
+        playbackModeContainer.removeAllViews()
+        val currentMode = prefs.playbackEngineMode
+        for (mode in PlaybackEngineMode.values()) {
+            val isSelected = (mode == currentMode)
+            val row = createToggleRow(
+                title = mode.title,
+                subtitle = mode.subtitle,
+                isEnabled = isSelected,
+                enabledLabel = "●  ACTIVE",
+                disabledLabel = "○  SELECT"
+            ) {
+                prefs.playbackEngineMode = mode
+                populatePlaybackModeSelector()
+                Toast.makeText(
+                    this,
+                    "Playback mode set to: ${mode.title}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            playbackModeContainer.addView(row)
+        }
     }
 
     private fun populateChannelToggles() {
@@ -336,9 +377,11 @@ class MainActivity : AppCompatActivity() {
         title: String,
         subtitle: String,
         isEnabled: Boolean,
+        enabledLabel: String = "☑  ENABLED",
+        disabledLabel: String = "☐  DISABLED",
         onToggle: () -> Unit
     ): Button {
-        val statusIcon = if (isEnabled) "☑  ENABLED" else "☐  DISABLED"
+        val statusIcon = if (isEnabled) enabledLabel else disabledLabel
         return Button(this).apply {
             text = "$statusIcon   •   $title\n     $subtitle"
             isAllCaps = false
@@ -449,7 +492,7 @@ class MainActivity : AppCompatActivity() {
             "Not synced yet"
         }
         val prefix = customPrefix ?: "Server: ${prefs.serverName.ifBlank { prefs.serverUrl }} (${prefs.serverUrl})"
-        statusBanner.text = "$prefix  •  $lastSync  •  Active Real-Time Listener: RUNNING"
+        statusBanner.text = "$prefix  •  $lastSync  •  1-Click Play: ACTIVE"
     }
 
     override fun onDestroy() {

@@ -19,7 +19,7 @@ import com.projectivy.plexconnect.data.BuiltInChannelType
 import com.projectivy.plexconnect.data.PlexMediaItem
 import com.projectivy.plexconnect.network.PlexApiClient
 import com.projectivy.plexconnect.ui.MainActivity
-import com.projectivy.plexconnect.ui.MediaDetailsActivity
+import com.projectivy.plexconnect.ui.SingleClickPlayActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -34,9 +34,6 @@ class ChannelSyncManager(private val context: Context) {
         private val syncMutex = Mutex()
     }
 
-    /**
-     * Fast sync for real-time playback changes: updates Continue Watching, On Deck, and System Watch Next row.
-     */
     suspend fun syncPlaybackChannelsNow() = withContext(Dispatchers.IO) {
         if (!prefs.isConfigured()) return@withContext
         syncMutex.withLock {
@@ -67,9 +64,6 @@ class ChannelSyncManager(private val context: Context) {
         }
     }
 
-    /**
-     * Full sync across all enabled built-in channels, custom Plex Collections, and the System Watch Next row.
-     */
     suspend fun syncAllChannels() = withContext(Dispatchers.IO) {
         if (!prefs.isConfigured()) return@withContext
         syncMutex.withLock {
@@ -160,7 +154,6 @@ class ChannelSyncManager(private val context: Context) {
                 TvContractCompat.requestChannelBrowsable(context, channelId)
             }
 
-            // Clear old programs in this channel and insert fresh ordered list
             val programsUri = TvContractCompat.buildPreviewProgramsUriForChannel(channelId)
             context.contentResolver.delete(programsUri, null, null)
 
@@ -176,9 +169,6 @@ class ChannelSyncManager(private val context: Context) {
         }
     }
 
-    /**
-     * Requirement 3: Sync Continue Watching directly into Android TV's system Watch Next / Play Next row.
-     */
     private fun syncSystemWatchNextRow(items: List<PlexMediaItem>) {
         try {
             val watchNextUri = TvContractCompat.WatchNextPrograms.CONTENT_URI
@@ -209,7 +199,7 @@ class ChannelSyncManager(private val context: Context) {
                         else
                             TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3
                     )
-                    .setIntentUri(buildFirstClickDetailsIntentUri(item))
+                    .setIntentUri(buildSingleClickPlayIntentUri(item))
                     .setInternalProviderId("watchnext_${item.ratingKey}")
 
                 if (item.duration > 0L) {
@@ -246,7 +236,7 @@ class ChannelSyncManager(private val context: Context) {
                 else
                     TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3
             )
-            .setIntentUri(buildFirstClickDetailsIntentUri(item))
+            .setIntentUri(buildSingleClickPlayIntentUri(item))
             .setInternalProviderId(item.ratingKey)
             .setWeight(weight)
 
@@ -263,21 +253,18 @@ class ChannelSyncManager(private val context: Context) {
         return builder.build()
     }
 
-    private fun buildFirstClickDetailsIntentUri(item: PlexMediaItem): Uri {
-        val intent = Intent(context, MediaDetailsActivity::class.java).apply {
-            action = "com.projectivy.plexconnect.OPEN_DETAILS"
-            data = Uri.parse("plexconnect://details/${item.ratingKey}")
+    private fun buildSingleClickPlayIntentUri(item: PlexMediaItem): Uri {
+        val intent = Intent(context, SingleClickPlayActivity::class.java).apply {
+            action = "com.projectivy.plexconnect.PLAY_MEDIA"
+            data = Uri.parse("plexconnect://play/${item.ratingKey}")
             putExtra("ratingKey", item.ratingKey)
             putExtra("key", item.key)
             putExtra("type", item.type)
             putExtra("title", item.displayTitle)
             putExtra("subtitle", item.displaySubtitle)
-            putExtra("summary", item.summary)
             putExtra("duration", item.duration)
             putExtra("viewOffset", item.viewOffset)
-            putExtra("year", item.year)
-            putExtra("posterUrl", item.getPosterUrl())
-            putExtra("backdropUrl", item.getBackdropUrl())
+            putExtra("partKeyPath", item.partKeyPath ?: "")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         return Uri.parse(intent.toUri(Intent.URI_INTENT_SCHEME))

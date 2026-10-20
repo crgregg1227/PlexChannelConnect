@@ -5,9 +5,16 @@
         <item name="android:colorAccent">#E5A00D</item>
     </style>
 
-    <style name="Theme.PlexConnect.Dialog" parent="Theme.AppCompat.NoActionBar">
-        <item name="android:windowBackground">#CC090D12</item>
+    <style name="Theme.PlexConnect.Translucent" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowIsTranslucent">true</item>
+        <item name="android:colorPrimary">#E5A00D</item>
+        <item name="android:colorAccent">#E5A00D</item>
+    </style>
+
+    <style name="Theme.PlexConnect.Fullscreen" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:windowFullscreen">true</item>
         <item name="android:colorPrimary">#E5A00D</item>
         <item name="android:colorAccent">#E5A00D</item>
     </style>

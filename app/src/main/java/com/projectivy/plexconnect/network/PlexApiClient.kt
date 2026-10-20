@@ -1,13 +1,17 @@
 package com.projectivy.plexconnect.network
 
+import android.net.Uri
 import com.projectivy.plexconnect.data.AppPreferences
+import com.projectivy.plexconnect.data.PlexClientPlayer
 import com.projectivy.plexconnect.data.PlexCollection
 import com.projectivy.plexconnect.data.PlexLibrarySection
 import com.projectivy.plexconnect.data.PlexMediaItem
+import com.projectivy.plexconnect.data.PlexPlaybackUrls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -27,13 +31,177 @@ class PlexApiClient(private val prefs: AppPreferences) {
             .url(fullUrl)
             .header("Accept", "application/json")
             .header("X-Plex-Platform", "Android TV")
+            .header("X-Plex-Device", "Android TV")
+            .header("X-Plex-Device-Name", "Plex Channel Connect")
             .header("X-Plex-Product", "Plex Channel Connect")
+            .header("X-Plex-Version", "1.1.0")
             .header("X-Plex-Client-Identifier", prefs.clientIdentifier)
 
         if (prefs.plexToken.isNotBlank()) {
             builder.header("X-Plex-Token", prefs.plexToken)
         }
         return builder.build()
+    }
+
+    suspend fun resolvePlaybackUrls(ratingKey: String, fallbackOffsetMs: Long): PlexPlaybackUrls? =
+        withContext(Dispatchers.IO) {
+            val req = buildRequest("/library/metadata/$ratingKey") ?: return@withContext null
+            try {
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext null
+                    val root = JSONObject(resp.body?.string() ?: return@withContext null)
+                    val metaArr = root.optJSONObject("MediaContainer")?.optJSONArray("Metadata")
+                        ?: return@withContext null
+                    if (metaArr.length() == 0) return@withContext null
+
+                    val obj = metaArr.getJSONObject(0)
+                    val item = parseMediaItem(obj) ?: return@withContext null
+                    val mediaArr = obj.optJSONArray("Media")
+                    var partKey = ""
+                    if (mediaArr != null && mediaArr.length() > 0) {
+                        val parts = mediaArr.getJSONObject(0).optJSONArray("Part")
+                        if (parts != null && parts.length() > 0) {
+                            partKey = parts.getJSONObject(0).optString("key", "")
+                        }
+                    }
+
+                    val cleanBase = prefs.serverUrl.trimEnd('/')
+                    val tokParam = if (prefs.plexToken.isNotBlank()) "X-Plex-Token=${prefs.plexToken}" else ""
+
+                    val directPlayUrl = if (partKey.isNotBlank()) {
+                        val sep = if (partKey.contains("?")) "&" else "?"
+                        if (tokParam.isNotBlank()) "$cleanBase$partKey$sep$tokParam" else "$cleanBase$partKey"
+                    } else ""
+
+                    val encodedMetaPath = Uri.encode("/library/metadata/$ratingKey")
+                    val hlsBase = "$cleanBase/video/:/transcode/universal/start.m3u8" +
+                        "?hasMDE=1" +
+                        "&path=$encodedMetaPath" +
+                        "&mediaIndex=0" +
+                        "&partIndex=0" +
+                        "&protocol=hls" +
+                        "&fastSeek=1" +
+                        "&directPlay=0" +
+                        "&directStream=1" +
+                        "&videoQuality=100" +
+                        "&maxVideoBitrate=40000" +
+                        "&X-Plex-Platform=Android" +
+                        "&X-Plex-Client-Identifier=${prefs.clientIdentifier}" +
+                        "&X-Plex-Product=Plex+Channel+Connect" +
+                        "&X-Plex-Device=Android+TV"
+                    val hlsUrl = if (tokParam.isNotBlank()) "$hlsBase&$tokParam" else hlsBase
+
+                    PlexPlaybackUrls(
+                        ratingKey = ratingKey,
+                        title = item.displayTitle,
+                        subtitle = item.displaySubtitle,
+                        durationMs = item.duration,
+                        viewOffsetMs = if (item.viewOffset > 0L) item.viewOffset else fallbackOffsetMs,
+                        directPlayUrl = directPlayUrl.ifBlank { hlsUrl },
+                        hlsTranscodeUrl = hlsUrl,
+                        mediaPartKey = partKey
+                    )
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+    suspend fun reportTimelineToPlex(
+        ratingKey: String,
+        state: String,
+        currentPositionMs: Long,
+        durationMs: Long
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val safeDuration = durationMs.coerceAtLeast(1L)
+            val safeTime = currentPositionMs.coerceIn(0L, safeDuration)
+            val encodedKey = Uri.encode("/library/metadata/$ratingKey")
+            val timelinePath = "/:/timeline" +
+                "?ratingKey=$ratingKey" +
+                "&key=$encodedKey" +
+                "&state=$state" +
+                "&hasMDE=1" +
+                "&time=$safeTime" +
+                "&duration=$safeDuration" +
+                "&identifier=com.plexapp.plugins.library"
+
+            val req = buildRequest(timelinePath) ?: return@withContext
+            httpClient.newCall(req).execute().close()
+
+            if (state == "stopped" && durationMs > 60_000L && safeTime >= (durationMs * 92L) / 100L) {
+                val scrobblePath = "/:/scrobble?identifier=com.plexapp.plugins.library&key=$ratingKey"
+                buildRequest(scrobblePath)?.let { httpClient.newCall(it).execute().close() }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    suspend fun fetchAvailablePlexClients(): List<PlexClientPlayer> = withContext(Dispatchers.IO) {
+        val players = mutableListOf<PlexClientPlayer>()
+
+        buildRequest("/clients")?.let { req ->
+            try {
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val root = JSONObject(resp.body?.string() ?: "{}")
+                        val servers = root.optJSONObject("MediaContainer")?.optJSONArray("Server")
+                        if (servers != null) {
+                            for (i in 0 until servers.length()) {
+                                val s = servers.getJSONObject(i)
+                                val id = s.optString("machineIdentifier", "")
+                                val host = s.optString("address", s.optString("host", ""))
+                                val port = s.optInt("port", 32500)
+                                val name = s.optString("name", "Plex Player")
+                                if (id.isNotBlank()) {
+                                    players.add(PlexClientPlayer(name, id, host, port))
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        if (prefs.plexToken.isNotBlank()) {
+            try {
+                val resReq = Request.Builder()
+                    .url("https://plex.tv/api/v2/resources?includeHttps=1")
+                    .header("Accept", "application/json")
+                    .header("X-Plex-Token", prefs.plexToken)
+                    .header("X-Plex-Client-Identifier", prefs.clientIdentifier)
+                    .build()
+
+                httpClient.newCall(resReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val arr = JSONArray(resp.body?.string() ?: "[]")
+                        for (i in 0 until arr.length()) {
+                            val dev = arr.getJSONObject(i)
+                            val provides = dev.optString("provides", "")
+                            val product = dev.optString("product", "")
+                            if (provides.contains("player") || provides.contains("client") || product.contains("Android")) {
+                                val clientId = dev.optString("clientIdentifier", "")
+                                val name = dev.optString("name", "Android TV")
+                                var localAddr = "127.0.0.1"
+                                var localPort = 32500
+                                val conns = dev.optJSONArray("connections")
+                                if (conns != null && conns.length() > 0) {
+                                    localAddr = conns.getJSONObject(0).optString("address", "127.0.0.1")
+                                    localPort = conns.getJSONObject(0).optInt("port", 32500)
+                                }
+                                if (clientId.isNotBlank() && clientId != prefs.machineIdentifier) {
+                                    players.add(PlexClientPlayer(name, clientId, localAddr, localPort))
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        players.distinctBy { it.machineIdentifier }
     }
 
     suspend fun fetchLibrarySections(): List<PlexLibrarySection> = withContext(Dispatchers.IO) {
@@ -193,10 +361,6 @@ class PlexApiClient(private val prefs: AppPreferences) {
             )
         }
 
-    suspend fun fetchSingleItem(ratingKey: String): PlexMediaItem? = withContext(Dispatchers.IO) {
-        fetchMetadataList("/library/metadata/$ratingKey").firstOrNull()
-    }
-
     private fun fetchMetadataList(path: String): List<PlexMediaItem> {
         val req = buildRequest(path) ?: return emptyList()
         val results = mutableListOf<PlexMediaItem>()
@@ -233,9 +397,21 @@ class PlexApiClient(private val prefs: AppPreferences) {
     private fun parseMediaItem(obj: JSONObject): PlexMediaItem? {
         val ratingKey = obj.optString("ratingKey", "")
         if (ratingKey.isBlank()) return null
+
+        var partKey: String? = null
+        val mediaArr = obj.optJSONArray("Media")
+        if (mediaArr != null && mediaArr.length() > 0) {
+            val parts = mediaArr.getJSONObject(0).optJSONArray("Part")
+            if (parts != null && parts.length() > 0) {
+                partKey = parts.getJSONObject(0).optString("key", "").takeIf { it.isNotBlank() }
+            }
+        }
+
         return PlexMediaItem(
             ratingKey = ratingKey,
             key = obj.optString("key", "/library/metadata/$ratingKey"),
+            guid = obj.optString("guid", ""),
+            slug = obj.optString("slug", ""),
             type = obj.optString("type", "movie"),
             title = obj.optString("title", "Untitled"),
             grandparentTitle = obj.optString("grandparentTitle", "").takeIf { it.isNotBlank() },
@@ -252,6 +428,7 @@ class PlexApiClient(private val prefs: AppPreferences) {
             grandparentThumbPath = obj.optString("grandparentThumb", "").takeIf { it.isNotBlank() },
             grandparentArtPath = obj.optString("grandparentArt", "").takeIf { it.isNotBlank() },
             parentThumbPath = obj.optString("parentThumb", "").takeIf { it.isNotBlank() },
+            partKeyPath = partKey,
             contentRating = obj.optString("contentRating", "").takeIf { it.isNotBlank() },
             rating = obj.optDouble("audienceRating", obj.optDouble("rating", 0.0)).takeIf { it > 0.0 },
             addedAt = obj.optLong("addedAt", 0L),

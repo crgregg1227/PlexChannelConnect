@@ -1,5 +1,6 @@
 package com.projectivy.plexconnect.network
 
+import com.projectivy.plexconnect.data.PlexClientPlayer
 import com.projectivy.plexconnect.data.PlexServerInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,10 +27,6 @@ class PlexDiscoveryAndAuth(private val clientId: String) {
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
-    /**
-     * Requirement 1: Attempt automatic local Plex Media Server discovery via UDP GDM (port 32414)
-     * and test if the local server permits local subnet access without requiring sign-in.
-     */
     suspend fun discoverLocalServerViaGdm(): List<PlexServerInfo> = withContext(Dispatchers.IO) {
         val discovered = mutableListOf<PlexServerInfo>()
         var socket: DatagramSocket? = null
@@ -91,6 +88,62 @@ class PlexDiscoveryAndAuth(private val clientId: String) {
         discovered.distinctBy { it.baseUrl }
     }
 
+    suspend fun discoverLocalPlayersViaGdm(): List<PlexClientPlayer> = withContext(Dispatchers.IO) {
+        val players = mutableListOf<PlexClientPlayer>()
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket()
+            socket.broadcast = true
+            socket.soTimeout = 1200
+
+            val msg = "M-SEARCH * HTTP/1.1\r\n\r\n".toByteArray(Charsets.UTF_8)
+            val group = InetAddress.getByName("239.0.0.250")
+            val packet = DatagramPacket(msg, msg.size, group, 32412)
+            socket.send(packet)
+
+            val buf = ByteArray(2048)
+            val start = System.currentTimeMillis()
+            while (System.currentTimeMillis() - start < 1200) {
+                val recv = DatagramPacket(buf, buf.size)
+                socket.receive(recv)
+                val body = String(recv.data, 0, recv.length, Charsets.UTF_8)
+                if (body.contains("200 OK")) {
+                    val hostIp = recv.address.hostAddress ?: continue
+                    var port = 32500
+                    var name = "Plex Player ($hostIp)"
+                    var machineId = ""
+
+                    for (line in body.lines()) {
+                        val parts = line.split(":", limit = 2)
+                        if (parts.size == 2) {
+                            val k = parts[0].trim().lowercase()
+                            val v = parts[1].trim()
+                            when (k) {
+                                "port" -> port = v.toIntOrNull() ?: 32500
+                                "name" -> if (v.isNotBlank()) name = v
+                                "resource-identifier" -> machineId = v
+                            }
+                        }
+                    }
+                    if (machineId.isNotBlank()) {
+                        players.add(
+                            PlexClientPlayer(
+                                name = name,
+                                machineIdentifier = machineId,
+                                address = hostIp,
+                                port = port
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            socket?.close()
+        }
+        players.distinctBy { it.machineIdentifier }
+    }
+
     fun probeUnauthenticatedAccess(baseUrl: String): Boolean {
         return try {
             val req = Request.Builder()
@@ -121,9 +174,6 @@ class PlexDiscoveryAndAuth(private val clientId: String) {
         }
     }
 
-    /**
-     * Fallback Requirement 1: Request a 4-character PIN code for https://plex.tv/link
-     */
     suspend fun requestPlexPin(): PlexPinResponse? = withContext(Dispatchers.IO) {
         try {
             val body = FormBody.Builder()

@@ -8,6 +8,24 @@ data class PlexServerInfo(
     val isLocalAuthFree: Boolean = false
 )
 
+data class PlexClientPlayer(
+    val name: String,
+    val machineIdentifier: String,
+    val address: String,
+    val port: Int = 32500
+)
+
+data class PlexPlaybackUrls(
+    val ratingKey: String,
+    val title: String,
+    val subtitle: String,
+    val durationMs: Long,
+    val viewOffsetMs: Long,
+    val directPlayUrl: String,
+    val hlsTranscodeUrl: String,
+    val mediaPartKey: String
+)
+
 data class PlexLibrarySection(
     val key: String,
     val title: String,
@@ -25,6 +43,8 @@ data class PlexCollection(
 data class PlexMediaItem(
     val ratingKey: String,
     val key: String,
+    val guid: String = "",
+    val slug: String = "",
     val type: String, // "movie", "episode", "show", "season"
     val title: String,
     val grandparentTitle: String? = null,
@@ -41,6 +61,7 @@ data class PlexMediaItem(
     val grandparentThumbPath: String? = null,
     val grandparentArtPath: String? = null,
     val parentThumbPath: String? = null,
+    val partKeyPath: String? = null,
     val contentRating: String? = null,
     val rating: Double? = null,
     val addedAt: Long = 0L,
@@ -81,11 +102,6 @@ data class PlexMediaItem(
             }
         }
 
-    /**
-     * Requirement 4:
-     * - 16:9 landscape with a video still/backdrop if the video is in progress (viewOffset > 0)
-     * - 2:3 vertical poster if the video is unplayed (viewOffset == 0)
-     */
     fun getCardImageUrl(): String {
         val rawPath = if (isInProgress) {
             when (type) {
@@ -102,19 +118,6 @@ data class PlexMediaItem(
         return buildAuthenticatedImageUrl(rawPath, isInProgress)
     }
 
-    fun getBackdropUrl(): String {
-        val rawPath = artPath ?: grandparentArtPath ?: thumbPath ?: return ""
-        return buildAuthenticatedImageUrl(rawPath, true)
-    }
-
-    fun getPosterUrl(): String {
-        val rawPath = when (type) {
-            "episode" -> grandparentThumbPath ?: parentThumbPath ?: thumbPath
-            else -> thumbPath
-        } ?: return ""
-        return buildAuthenticatedImageUrl(rawPath, false)
-    }
-
     private fun buildAuthenticatedImageUrl(path: String, landscape16x9: Boolean): String {
         if (path.isBlank()) return ""
         if (path.startsWith("http://") || path.startsWith("https://")) return path
@@ -129,6 +132,23 @@ data class PlexMediaItem(
             if (tokenParam.isNotBlank()) "$cleanBase$path$sep$tokenParam" else "$cleanBase$path"
         }
     }
+}
+
+enum class PlaybackEngineMode(
+    val id: String,
+    val title: String,
+    val subtitle: String
+) {
+    BUILT_IN_EXOPLAYER(
+        "builtin_exoplayer",
+        "Built-In Instant 4K Player (Recommended)",
+        "Plays video immediately in 1 click directly from your Plex server and syncs watch progress automatically"
+    ),
+    OFFICIAL_PLEX_COMPANION(
+        "official_plex_companion",
+        "Official Plex App + Companion Cast Relay",
+        "Opens Plex for Android TV and casts the PlayQueue via X-Plex-Target-Client-Identifier (requires 'Advertise as player' enabled in Plex settings)"
+    )
 }
 
 enum class BuiltInChannelType(

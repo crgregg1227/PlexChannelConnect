@@ -50,20 +50,32 @@
             </intent-filter>
         </activity>
 
-        <!-- 1st-Click Media Details Screen (2nd Click Starts Playback Immediately) -->
+        <!-- Single-Click Instant Play Dispatcher (No intermediate details screen!) -->
         <activity
-            android:name=".ui.MediaDetailsActivity"
+            android:name=".ui.SingleClickPlayActivity"
             android:exported="true"
-            android:theme="@style/Theme.PlexConnect.Dialog"
-            android:configChanges="keyboard|keyboardHidden|navigation">
+            android:theme="@style/Theme.PlexConnect.Translucent"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize">
             <intent-filter>
+                <action android:name="com.projectivy.plexconnect.PLAY_MEDIA" />
                 <action android:name="com.projectivy.plexconnect.OPEN_DETAILS" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="plexconnect"
+                    android:host="play" />
                 <data
                     android:scheme="plexconnect"
                     android:host="details" />
             </intent-filter>
         </activity>
+
+        <!-- Built-in 4K Direct Video Player Activity (ExoPlayer + Live Plex Timeline Sync) -->
+        <activity
+            android:name=".ui.DirectVideoPlayerActivity"
+            android:exported="false"
+            android:keepScreenOn="true"
+            android:theme="@style/Theme.PlexConnect.Fullscreen"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize" />
 
         <!-- Active Real-Time WebSocket & App-Return Sync Service -->
         <service

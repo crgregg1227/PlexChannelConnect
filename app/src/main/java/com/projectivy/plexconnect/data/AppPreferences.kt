@@ -28,7 +28,7 @@ class AppPreferences(context: Context) {
 
     var machineIdentifier: String
         get() = prefs.getString("machine_id", "") ?: ""
-        set(value) = prefs.edit().putString("machine_id", value).apply()
+        set(value) = prefs.edit().putString("machine_id", value.trim()).apply()
 
     var plexToken: String
         get() = prefs.getString("plex_token", "") ?: ""
@@ -37,6 +37,18 @@ class AppPreferences(context: Context) {
     var isLocalNoAuth: Boolean
         get() = prefs.getBoolean("is_local_no_auth", false)
         set(value) = prefs.edit().putBoolean("is_local_no_auth", value).apply()
+
+    var playbackEngineMode: PlaybackEngineMode
+        get() {
+            val saved = prefs.getString("playback_engine_mode", PlaybackEngineMode.BUILT_IN_EXOPLAYER.id)
+            return PlaybackEngineMode.values().firstOrNull { it.id == saved }
+                ?: PlaybackEngineMode.BUILT_IN_EXOPLAYER
+        }
+        set(value) = prefs.edit().putString("playback_engine_mode", value.id).apply()
+
+    var targetPlexClientId: String
+        get() = prefs.getString("target_plex_client_id", "") ?: ""
+        set(value) = prefs.edit().putString("target_plex_client_id", value.trim()).apply()
 
     var syncWatchNextSystemRow: Boolean
         get() = prefs.getBoolean("sync_watch_next_row", true)
