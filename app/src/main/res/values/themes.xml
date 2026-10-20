@@ -1,0 +1,14 @@
+<resources>
+    <style name="Theme.PlexConnect" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#0D1117</item>
+        <item name="android:colorPrimary">#E5A00D</item>
+        <item name="android:colorAccent">#E5A00D</item>
+    </style>
+
+    <style name="Theme.PlexConnect.Dialog" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#CC090D12</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:colorPrimary">#E5A00D</item>
+        <item name="android:colorAccent">#E5A00D</item>
+    </style>
+</resources>

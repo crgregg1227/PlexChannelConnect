@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Plex Channel Connect</string>
+    <string name="channel_notification_title">Plex Channel Sync Active</string>
+    <string name="channel_notification_desc">Listening for Plex playback updates in real time</string>
+</resources>
